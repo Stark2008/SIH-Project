@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String        @id @default(uuid())
+  email            String        @unique
+  passwordHash     String
+  name             String
+  location         String?
+  role             String        @default("FARMER") // Emulating enum: FARMER, FPO, BUYER, ADMIN
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  produce          Produce[]
+  requirements     Requirement[]
+  ordersAsBuyer    Order[]       @relation("OrderBuyer")
+  ordersAsSupplier Order[]       @relation("OrderSupplier")
+  payments         Payment[]
+  escrowAsBuyer    EscrowLedger[] @relation("EscrowBuyer")
+  escrowAsSupplier EscrowLedger[] @relation("EscrowSupplier")
+}
+
+model Produce {
+  id               String        @id @default(uuid())
+  supplierId       String
+  crop             String
+  quantity         Float
+  harvestDate      DateTime
+  location         String
+  qualityGrade     String
+  expectedPrice    Float
+  status           String        @default("AVAILABLE") // Emulating enum: AVAILABLE, COMMITTED, SOLD
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  supplier         User          @relation(fields: [supplierId], references: [id])
+  orders           Order[]
+}
+
+model Requirement {
+  id               String            @id @default(uuid())
+  buyerId          String
+  crop             String
+  quantity         Float
+  qualityGrade     String
+  deliveryLocation String
+  status           String            @default("OPEN") // Emulating enum: OPEN, FULFILLED, CANCELLED
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  buyer            User              @relation(fields: [buyerId], references: [id])
+  orders           Order[]
+}
+
+model Order {
+  id               String      @id @default(uuid())
+  produceId        String
+  requirementId    String?
+  buyerId          String
+  supplierId       String
+  agreedQuantity   Float
+  agreedPrice      Float
+  status           String      @default("PENDING") // Emulating enum: PENDING, CONFIRMED, PICKUP, IN_TRANSIT, DELIVERED
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  produce          Produce       @relation(fields: [produceId], references: [id])
+  requirement      Requirement?  @relation(fields: [requirementId], references: [id])
+  buyer            User          @relation("OrderBuyer", fields: [buyerId], references: [id])
+  supplier         User          @relation("OrderSupplier", fields: [supplierId], references: [id])
+  events           OrderEvent[]
+  payments         Payment[]
+  escrowEntries    EscrowLedger[]
+}
+
+model OrderEvent {
+  id               String      @id @default(uuid())
+  orderId          String
+  status           String
+  description      String
+  location         String?
+  createdAt        DateTime    @default(now())
+
+  order            Order       @relation(fields: [orderId], references: [id])
+}
+
+model Payment {
+  id               String      @id @default(uuid())
+  orderId          String
+  buyerId          String
+  amount           Int         // Stored in paise (1/100 of INR)
+  currency         String      @default("INR")
+  status           String      @default("PENDING") // PENDING, AUTHORIZED, CAPTURED, FAILED, CANCELLED, REFUNDED
+  provider         String      @default("MOCK_PROVIDER")
+  providerTxId     String?
+  idempotencyKey   String      @unique
+  failureReason    String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  completedAt      DateTime?
+
+  order            Order       @relation(fields: [orderId], references: [id])
+  buyer            User        @relation(fields: [buyerId], references: [id])
+  escrowEntries    EscrowLedger[]
+}
+
+model EscrowLedger {
+  id               String      @id @default(uuid())
+  orderId          String
+  paymentId        String
+  buyerId          String
+  supplierId       String
+  entryType        String      // ESCROW_LOCKED, ESCROW_RELEASED, ESCROW_CANCELLED, SIMULATED_REFUND
+  amount           Int         // Stored in paise
+  currency         String      @default("INR")
+  direction        String      // CREDIT, DEBIT
+  idempotencyKey   String      @unique
+  description      String?
+  createdAt        DateTime    @default(now())
+
+  order            Order       @relation(fields: [orderId], references: [id])
+  payment          Payment     @relation(fields: [paymentId], references: [id])
+  buyer            User        @relation("EscrowBuyer", fields: [buyerId], references: [id])
+  supplier         User        @relation("EscrowSupplier", fields: [supplierId], references: [id])
+
+  @@unique([paymentId, entryType])
+}
